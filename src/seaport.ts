@@ -90,6 +90,7 @@ import {
   OpenSeaAsset,
   OpenSeaFungibleToken,
   Order,
+  OrderJSON,
   OrderSide,
   PartialReadonlyContractAbi,
   RawWyvernOrderJSON,
@@ -844,6 +845,68 @@ export class OpenSeaPort {
       ...signature,
     };
     return this.validateAndPostOrder(orderWithSignature);
+  }
+
+  public async getBuyOrderRequestBody({
+    asset,
+    accountAddress,
+    startAmount,
+    quantity = 1,
+    expirationTime = 0,
+    paymentTokenAddress,
+    sellOrder,
+    referrerAddress,
+  }: {
+    asset: Asset;
+    accountAddress: string;
+    startAmount: number;
+    quantity?: number;
+    expirationTime?: number;
+    paymentTokenAddress?: string;
+    sellOrder?: Order;
+    referrerAddress?: string;
+  }): Promise<OrderJSON> {
+    paymentTokenAddress =
+      paymentTokenAddress ||
+      WyvernSchemas.tokens[this._networkName].canonicalWrappedEther.address;
+    if (!paymentTokenAddress) {
+      throw new Error("Payment token required");
+    }
+
+    const order = await this._makeBuyOrder({
+      asset,
+      quantity,
+      accountAddress,
+      startAmount,
+      expirationTime,
+      paymentTokenAddress,
+      extraBountyBasisPoints: 0,
+      sellOrder,
+      referrerAddress,
+    });
+
+    // NOTE not in Wyvern exchange code:
+    // frontend checks to make sure
+    // token is approved and sufficiently available
+    await this._buyOrderValidationAndApprovals({ order, accountAddress });
+    const hashedOrder = {
+      ...order,
+      hash: getOrderHash(order),
+    };
+    let signature;
+    try {
+      signature = await this.authorizeOrder(hashedOrder);
+    } catch (error) {
+      console.error(error);
+      throw new Error("You declined to authorize your offer");
+    }
+
+    const orderWithSignature = {
+      ...hashedOrder,
+      ...signature,
+    };
+
+    return orderToJSON(orderWithSignature);
   }
 
   /**
